@@ -1,11 +1,14 @@
 [package]
 name = "ipynbat"
+description = "A Jupyter notebook terminal viewer"
+categories = ["command-line-utilities"]
 version = "0.1.0"
 authors = ["Edgar Onghena <dev@edgar.bzh>"]
 edition = "2018"
 
 [dependencies]
 base64 = "0.13"
+clap = { version = "3.0.0-beta.2", features = ["color"] }
 dirs = "3.0"
 image = "0.23"
 pager = "0.16"

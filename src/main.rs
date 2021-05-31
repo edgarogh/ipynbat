@@ -1,7 +1,10 @@
+mod args;
 mod kernel;
+mod notebook;
 
-use serde::de::IgnoredAny;
-use std::collections::HashMap;
+use crate::args::Args;
+use crate::kernel::KernelSpec;
+use crate::notebook::{Notebook, NotebookCell, NotebookCellOutput, NotebookVersion};
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::BufReader;
@@ -9,110 +12,6 @@ use std::path::Path;
 use termimad::{FmtLine, MadSkin};
 
 const FIRST_COLUMN_WIDTH: usize = 7;
-
-#[derive(Debug, serde::Deserialize)]
-struct Notebook {
-    cells: Vec<NotebookCell>,
-    metadata: NotebookMetadata,
-
-    #[serde(flatten)]
-    version: NotebookVersion,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(tag = "cell_type")]
-enum NotebookCell {
-    #[serde(rename = "code")]
-    Code {
-        id: String,
-        source: Vec<String>,
-        metadata: IgnoredAny,
-        execution_count: Option<u32>,
-        outputs: Vec<NotebookCellOutput>,
-    },
-    #[serde(rename = "markdown")]
-    Markdown {
-        id: String,
-        source: Vec<String>,
-        metadata: IgnoredAny,
-    },
-    #[serde(rename = "raw")]
-    Raw {
-        id: String,
-        source: Vec<String>,
-        metadata: IgnoredAny,
-        // TODO
-    },
-}
-
-impl NotebookCell {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Code { .. } => "Code",
-            Self::Markdown { .. } => "MD",
-            Self::Raw { .. } => "Raw",
-        }
-    }
-
-    pub fn source(&self, language: &str) -> String {
-        let mut ret = String::new();
-
-        match self {
-            Self::Markdown { source, .. } => ret.extend(source.iter().map(|s| s.as_str())),
-            Self::Code { source, .. } => {
-                ret.push_str("```");
-                ret.push_str(language);
-                ret.push('\n');
-                ret.extend(source.iter().map(|s| s.as_str()));
-                ret.push_str("\n```\n");
-            }
-            Self::Raw { source, .. } => ret.extend(source.iter().map(|s| s.as_str())), // TODO DRY
-        }
-
-        ret
-    }
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(tag = "output_type")]
-enum NotebookCellOutput {
-    #[serde(rename = "stream")]
-    Stream { name: String, text: Vec<String> },
-
-    #[serde(rename = "display_data")]
-    DisplayData {
-        data: HashMap<String, serde_json::Value>,
-    },
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct NotebookMetadata {
-    #[serde(rename = "kernelspec")]
-    kernel_spec: NotebookKernelSpec,
-
-    language_info: IgnoredAny,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct NotebookKernelSpec {
-    display_name: String,
-    language: String,
-    name: String,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
-struct NotebookVersion {
-    #[serde(rename = "nbformat")]
-    major: u32,
-    #[serde(rename = "nbformat_minor")]
-    minor: u32,
-}
-
-impl Display for NotebookVersion {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}", self.major, self.minor)
-    }
-}
 
 struct Line<'a, 's>(usize, &'a MadSkin, FmtLine<'s>);
 
@@ -123,15 +22,50 @@ impl Display for Line<'_, '_> {
 }
 
 fn main() {
-    let args = std::env::args().collect::<Vec<String>>();
-    assert_eq!(args.len(), 2, "One argument expected");
+    let args = Args::parse();
 
-    let file_name = Path::new(args.get(1).expect("expected one argument"));
-    let file = BufReader::new(File::open(file_name).unwrap());
+    match args {
+        Args {
+            file: None,
+            kernel: None,
+            run: false,
+            list_kernels: true,
+        } => {
+            for dir in KernelSpec::directories() {
+                println!("{}:", dir.display());
+                if let Ok(read_dir) = std::fs::read_dir(dir) {
+                    for kernel in read_dir.filter_map(|d| d.ok()) {
+                        let kfn = kernel.file_name();
+                        let name = kfn.to_string_lossy();
+                        let kernel = KernelSpec::find(&name);
+                        println!("   \x1b[32m{}\x1b[0m ({})", name, kernel.display_name)
+                    }
+                }
+            }
+        }
+        Args {
+            list_kernels: true, ..
+        } => {
+            panic!("--list-kernels didn't expect that much arguments")
+        }
+        Args {
+            file: Some(file_name),
+            kernel,
+            run,
+            list_kernels: false,
+        } => {
+            let file = BufReader::new(File::open(&file_name).unwrap());
+            let notebook: Notebook = serde_json::from_reader(file).unwrap();
+            print_file(notebook, &file_name)
+        }
+        Args { file: None, .. } => {
+            panic!("please specify a file or a subcommand")
+        }
+    }
+}
 
-    let notebook: Notebook = serde_json::from_reader(file).unwrap();
-
-    assert_eq!(notebook.version, NotebookVersion { major: 4, minor: 5 });
+fn print_file(notebook: Notebook, file_name: &Path) {
+    assert_eq!(notebook.version, NotebookVersion::new(4, 5));
 
     // let kernel_spec = KernelSpec::find(&notebook.metadata.kernel_spec.name);
 

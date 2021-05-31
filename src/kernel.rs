@@ -43,12 +43,24 @@ impl Display for KernelSpec {
     }
 }
 
+macro_rules! directories {
+    (@ $str:literal) => { Some(PathBuf::from($str)) };
+    (@ $dir:ident + $str:literal) => { ::dirs::$dir().map(|d| d.join($str)) };
+    [$($(#$attr:tt)? $($dir:ident +)? $str:literal,)*] => {
+        ::std::array::IntoIter::new([$(
+            $(#$attr)? directories!(@ $($dir +)? $str),
+        )*]).filter_map::<PathBuf, _>(|d| d).collect()
+    };
+}
+
 impl KernelSpec {
     #[cfg(target_os = "linux")]
-    pub fn directories() -> [PathBuf; 1] {
-        [dirs::home_dir()
-            .unwrap()
-            .join(".local/share/jupyter/kernels")] // TODO
+    pub fn directories() -> Vec<PathBuf> {
+        directories![
+            home_dir + ".local/share/jupyter/kernels",
+            "/usr/share/jupyter/kernels",
+            "/usr/local/share/jupyter/kernels",
+        ]
     }
 
     pub fn find(name: &str) -> KernelSpec {
