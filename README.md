@@ -13,7 +13,7 @@ This project is very very WIP and it `panic!`s a lot. Actually there's no proper
 
 ## Install
 
-`cargo install --git https://github.com/edgarogh/ipynbat` should work.
+`cargo install --git https://github.com/edgarogh/ipynbat --branch main` works.
 
 ## Contributions
 
